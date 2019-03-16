@@ -1,8 +1,11 @@
 # !/bin/bash
 
-curver=$(grep 'game_version' /opt/factorio/player-data.json| cut -c 22-27)
-echo 'Currently installed version: '$curver
-
+curver=$(grep 'version' /opt/factorio/data/base/info.json| cut -c 15-21)
+if [[ ! -z $curver ]]; then
+	echo 'Currently installed version: '$curver
+else
+	echo 'No installation found'
+fi
 if [ $# -eq 0 ]; then 
 	printf 'No argument specified, quitting...\n OPTIONS:\n [-x] to parse experimental\n [-s] to parse stable\n [-v] to install specific version\n'
 	exit
@@ -40,9 +43,12 @@ while getopts ":xshv:" opt;  do
 done
 
 function version { echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }'; }
-
+maxver=$(curl -s "https://www.factorio.com/get-download/${release}/headless/linux64" | grep -Po -m 1 "(\d+\.+\d+\.+\d+)" | head -1)
 if [ -z $getver ]; then 
-	getver=$(curl -s "https://www.factorio.com/get-download/${release}/headless/linux64" | grep -Po -m 1 "(\d+\.+\d+\.+\d+)" | head -1)
+	getver=$maxver
+elif [[ "$(version "$getver")" -gt "$(version "$maxver")" ]]; then
+	printf 'Version '$getver' does not yet exist. '$maxver' is the latest update.\n'
+	exit 1
 fi
 if [ -z $release ] || [[ "$release" = "stable" ]]; then
 	if [ "$(version "$curver")" -lt "$(version "$getver")" ]; then
@@ -50,30 +56,33 @@ if [ -z $release ] || [[ "$release" = "stable" ]]; then
 	elif [ "$(version "$curver")" -gt "$(version "$getver")" ]; then
 		grade='Down'
 	fi
-	read -p $grade'grade to '$getver'? [y/N] : ' -n 1 -r
+	if [ ! -z $grade ]; then 
+		read -p $grade'grade to '$getver'? [y/N] : ' -n 1 -r
+		echo ""
+	fi
+elif [ "$(version "$curver")" -ge "$(version "$getver")" ]; then
+	read -p "Latest version already installed. Overwrite? [y/N] : " -n 1 -r
 	echo ""
 else
 	if [ "$(version "$curver")" -lt "$(version "$getver")" ]; then
 		printf 'New version available for install:\n '$curver' > '$getver'\n'
 		read -p "Install now? [y/N] : " -n 1 -r 
 		echo ""
-	elif [ "$(version "$curver")" -gt "$(version "$getver")" ]; then
-		printf 'Latest version already installed\n	quitting...\n'
-		exit
 	fi
 fi
 if  [[ $REPLY =~ ^[Yy]$ ]]; then
 	rm -f /tmp/linux64*
 	if [ -z $release ]; then
-		wget --show-progress -P /tmp/ "https://www.factorio.com/get-download/${getver}/headless/linux64"
-	else 
-		wget --show-progress -P /tmp/ "https://www.factorio.com/get-download/${release}/headless/linux64"
+		release=$getver
 	fi
+	wget --show-progress -O /tmp/linux64 "https://www.factorio.com/get-download/${release}/headless/linux64"
 	if [[ $? -gt 1 ]]; then
 		printf 'Unable to download, quitting...\n'
 		exit 1
 	fi
-	tar -xJf /tmp/linux64 --directory /opt/ -v
+	echo 'Extracting to /opt/factorio'
+	tar --checkpoint=.100 -xJf /tmp/linux64 --directory /opt/ --overwrite
+	echo ""
 	if [[ $? != 0 ]]; then
 		printf 'Extraction failed, quitting...\n'
 		exit
